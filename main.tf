@@ -167,7 +167,7 @@ module "mwaa" {
   environment_class  = "mw1.small"
 
   execution_role_arn = module.iam_roles_mwaa.role_arn
-  source_bucket_arn  = module.s3.bucket_arn
+  source_bucket_arn  = module.s3_dag.my_bucket_arn  # S3 bucket that is used to store DAG files for MWAA
   dag_s3_path        = "dags"
 
   subnet_ids = data.aws_subnets.default.ids
