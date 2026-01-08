@@ -10,6 +10,7 @@ module "ec2_instance" {
     instance_type = "t3.micro"
     key_name = "my-key-pair"
     environment = "dev"
+    subnet_id = module.my_vpc.public_subnet_ids[0]
     allowed_cidr_blocks = ["0.0.0.0/0"]
 }    
 
@@ -24,6 +25,13 @@ module "s3_data"{
   source = "./modules/s3"
   bucket_name = "gaurav-data-bucket-123456"
   environment = "dev"
+}
+# calling vpc module to create vpc
+module "my_vpc" {
+  source       = "./modules/vpc"
+  vpc_cidr     = "10.0.0.0/16"
+  azs          = ["us-east-1a", "us-east-1b"]
+  project_name = "dev-env"
 }
 
 # IAM Roles for Lambda and MWAA (calling same module(iam) twice with different parameters to create two roles)
@@ -146,8 +154,7 @@ module "first_lambda"{
     role_arn = module.iam_roles_lambda.role_arn  # use the role in this lambda function (role is created in iam module so calling that module's output)
     filename = data.archive_file.first_lambda_function.output_path
     handler = "first_lambda.lambda_handler"
-    subnet_ids         = data.aws_subnets.default.ids
-
+    subnet_ids         = module.my_vpc.private_subnet_ids
 }
 module "second_lambda"{
     source = "./modules/lambda"
@@ -156,7 +163,7 @@ module "second_lambda"{
     role_arn = module.iam_roles_lambda.role_arn  # same for this lambda function as above (we can create separate roles too if needed)
     filename = data.archive_file.second_lambda_function.output_path
     handler = "second_lambda.lambda_handler"
-    subnet_ids         = data.aws_subnets.default.ids
+    subnet_ids         = module.my_vpc.private_subnet_ids
     security_group_ids = [aws_security_group.lambda_sg.id] # attach security group to allow access to Postgres EC2
 
 
@@ -211,8 +218,8 @@ module "mwaa" {
   source_bucket_arn  = module.s3_dag.my_bucket_arn  # S3 bucket that is used to store DAG files for MWAA
   dag_s3_path        = "dags"
 
-  subnet_ids = slice(data.aws_subnets.default.ids, 0, 2) # Use first two subnets from default VPC
-  vpc_id     = data.aws_vpc.default.id
+  vpc_id     = module.my_vpc.vpc_id
+  subnet_ids = module.my_vpc.private_subnet_ids
 
   min_workers = 1
   max_workers = 5
