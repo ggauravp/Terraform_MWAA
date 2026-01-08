@@ -33,19 +33,22 @@ variable "db_host" {
 } 
 variable "db_name" {
   type = string
-  default = null
+  default = "smapledb"
 }
 variable "db_user" {
   type = string
-  default = null
+  default = "postgres"
 }
 variable "db_password" {
   type = string
-  default = null
+  default = "yourpassword"
 }
 
-variable "depends_on" {
-  type    = list(any)
+
+variable "security_group_ids" {
+  type    = list(string)
   default = []
-  
+}
+variable "subnet_ids" {
+  type = list(string)
 }

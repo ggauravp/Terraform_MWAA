@@ -3,8 +3,8 @@ resource "aws_instance" "postgres_ec2" {
   instance_type = var.instance_type
   subnet_id     = data.aws_subnets.default.ids[0]
   key_name      = var.key_name
-  security_groups = [aws_security_group.ec2_sg.name]
-
+  vpc_security_group_ids = [aws_security_group.ec2_sg.id]
+  
   tags = {
     Name        = "postgres-ec2"
     Environment = var.environment

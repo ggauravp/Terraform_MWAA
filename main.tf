@@ -38,7 +38,7 @@ module "iam_roles_mwaa" {
   source = "./modules/iam"
 
   role_name = "mwaa-execution-role"
-  service_principal = "airflow.amazonaws.com" # Service principal for MWAA
+  service_principal = "airflow-env.amazonaws.com" # Service principal for MWAA
 }
 
 # policy attachments to respective roles
@@ -52,6 +52,12 @@ resource "aws_iam_role_policy_attachment" "lambda_s3" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess" # attach S3 full access policy to lambda role
   
 }
+
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  role       = module.iam_roles_lambda.role_name 
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole" # attach VPC access policy to lambda role
+}
+
 # Policy document: allow Lambda to invoke MWAA
 data "aws_iam_policy_document" "lambda_invoke_mwaa" {
   statement {
@@ -97,22 +103,41 @@ resource "aws_iam_role_policy_attachment" "attach_mwaa_invoke_lambda" {
   role       = module.iam_roles_mwaa.role_name
   policy_arn = aws_iam_policy.mwaa_invoke_lambda.arn
 }
-# Attach the AmazonMWAAFullAccess policy to the MWAA role
-resource "aws_iam_role_policy_attachment" "mwaa_full_access" {
-  role       = module.iam_roles_mwaa.role_name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonMWAAFullAccess"
+# Custom MWAA policy to allow access to CloudWatch Logs and S3
+resource "aws_iam_role_policy" "mwaa_policy" {
+  name = "mwaa-custom-execution-policy"
+  role =  module.iam_roles_mwaa.role_name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "airflow:PublishMetrics",
+          "logs:CreateLogStream",
+          "logs:CreateLogGroup",
+          "logs:PutLogEvents",
+          "s3:GetBucketLocation",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = "*" # Narrow this down to your specific buckets for better security
+      }
+    ]
+  })
 }
-
+# Packaging Lambda function code
 data "archive_file" "first_lambda_function" {
   type        = "zip"
-  source_file  = "${path.module}/first_lambda.py"
+  source_file  = "${path.module}/modules/lambda/first_lambda.py"
   output_path = "${path.module}/first_lambda_function.zip"
 }
 data "archive_file" "second_lambda_function"{
   type       = "zip"
-  source_file  = "${path.module}/second_lambda.py"
+  source_file  = "${path.module}/modules/lambda/second_lambda.py"
   output_path = "${path.module}/second_lambda_function.zip"
 }
+
 # creation of lambda functions by calling same lambda module twice with different parameters
 module "first_lambda"{
     source = "./modules/lambda"
@@ -121,8 +146,9 @@ module "first_lambda"{
     role_arn = module.iam_roles_lambda.role_arn  # use the role in this lambda function (role is created in iam module so calling that module's output)
     filename = data.archive_file.first_lambda_function.output_path
     handler = "first_lambda.lambda_handler"
-}
+    subnet_ids         = data.aws_subnets.default.ids
 
+}
 module "second_lambda"{
     source = "./modules/lambda"
 
@@ -130,20 +156,35 @@ module "second_lambda"{
     role_arn = module.iam_roles_lambda.role_arn  # same for this lambda function as above (we can create separate roles too if needed)
     filename = data.archive_file.second_lambda_function.output_path
     handler = "second_lambda.lambda_handler"
+    subnet_ids         = data.aws_subnets.default.ids
+    security_group_ids = [aws_security_group.lambda_sg.id] # attach security group to allow access to Postgres EC2
 
-    layers = [module.layer.layer_arn]  # attaching lambda layer created below
 
-    depends_on = [module.ec2_instance]  # ensure ec2 instance is created before second lambda
+    layers = [module.layer.layer_arn] # attaching lambda layer created below
 
     db_host = module.ec2_instance.postgres_ec2_public_ip  # passing ec2 instance public ip as db_host
-    db_name = "mydatabase"
-    db_user = "mydbuser"
-    db_password = "MySecurePassword123!"  # In real scenarios, use secrets manager
 }
 
+# Security group for Lambda to access Postgres EC2 instance
+resource "aws_security_group" "lambda_sg" {
+  name        = "lambda-sg"
+  description = "Security group for Lambda function_to_access_Postgres_EC2"
+  vpc_id      = data.aws_vpc.default.id
+
+  # Allow outbound to Postgres
+  egress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]  # restrict to specific CIDR blocks
+  }
+
+}
+
+# Create Lambda layer for dependencies like psycopg2
 data "archive_file" "init" {
   type        = "zip"
-  source_dir  = "${path.module}/python"
+  source_dir  = "${path.module}/modules/layer/python"
   output_path = "${path.module}/layer.zip"
 }
 
@@ -170,7 +211,7 @@ module "mwaa" {
   source_bucket_arn  = module.s3_dag.my_bucket_arn  # S3 bucket that is used to store DAG files for MWAA
   dag_s3_path        = "dags"
 
-  subnet_ids = data.aws_subnets.default.ids
+  subnet_ids = slice(data.aws_subnets.default.ids, 0, 2) # Use first two subnets from default VPC
   vpc_id     = data.aws_vpc.default.id
 
   min_workers = 1
