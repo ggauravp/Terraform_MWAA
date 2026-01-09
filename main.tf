@@ -10,6 +10,7 @@ module "ec2_instance" {
     instance_type = "t3.micro"
     key_name = "my-key-pair"
     environment = "dev"
+    vpc_id = module.my_vpc.vpc_id
     subnet_id = module.my_vpc.public_subnet_ids[0]
     allowed_cidr_blocks = ["0.0.0.0/0"]
 }    
@@ -97,7 +98,8 @@ data "aws_iam_policy_document" "mwaa_invoke_lambda" {
     ]
 
     resources = [
-      module.second_lambda.lambda_arn  # ARN of the second Lambda function to be invoked by MWAA
+      module.second_lambda.lambda_arn, #  ARN of the second Lambda function to be invoked by MWAA
+      "${module.second_lambda.lambda_arn}:*"  # to allow all versions and aliases
     ]
   }
 }
@@ -114,7 +116,8 @@ resource "aws_iam_role_policy_attachment" "attach_mwaa_invoke_lambda" {
 # Custom MWAA policy to allow access to CloudWatch Logs and S3
 resource "aws_iam_role_policy" "mwaa_policy" {
   name = "mwaa-custom-execution-policy"
-  role =  module.iam_roles_mwaa.role_name
+  role = module.iam_roles_mwaa.role_name
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -122,18 +125,26 @@ resource "aws_iam_role_policy" "mwaa_policy" {
         Effect = "Allow"
         Action = [
           "airflow:PublishMetrics",
-          "logs:CreateLogStream",
+
           "logs:CreateLogGroup",
+          "logs:CreateLogStream",
           "logs:PutLogEvents",
+
+          "cloudwatch:PutMetricData",
+
           "s3:GetBucketLocation",
           "s3:GetObject",
-          "s3:ListBucket"
+          "s3:ListBucket",
+          "s3:ListAllMyBuckets",
+          "s3:GetAccountPublicAccessBlock",
+          "s3:GetBucketPublicAccessBlock"
         ]
-        Resource = "*" # Narrow this down to your specific buckets for better security
+        Resource = "*"
       }
     ]
   })
 }
+
 # Packaging Lambda function code
 data "archive_file" "first_lambda_function" {
   type        = "zip"
@@ -155,6 +166,7 @@ module "first_lambda"{
     filename = data.archive_file.first_lambda_function.output_path
     handler = "first_lambda.lambda_handler"
     subnet_ids         = module.my_vpc.private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_sg.id] # attach security group to allow access to Postgres EC2
 }
 module "second_lambda"{
     source = "./modules/lambda"
@@ -176,13 +188,13 @@ module "second_lambda"{
 resource "aws_security_group" "lambda_sg" {
   name        = "lambda-sg"
   description = "Security group for Lambda function_to_access_Postgres_EC2"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = module.my_vpc.vpc_id
 
   # Allow outbound to Postgres
   egress {
     from_port   = 5432
     to_port     = 5432
-    protocol    = "-1"
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]  # restrict to specific CIDR blocks
   }
 

@@ -14,7 +14,7 @@ resource "aws_instance" "postgres_ec2" {
 resource "aws_security_group" "ec2_sg" {
   name        = "ec2-sg"
   description = "Allow Postgres access from Lambda"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = var.vpc_id
 
 # Allow Postgres access
   ingress {

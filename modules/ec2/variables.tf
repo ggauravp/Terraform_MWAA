@@ -20,3 +20,6 @@ variable "allowed_cidr_blocks" {
 variable "subnet_id" {
   type = string
 }
+variable "vpc_id" {
+  type = string
+}
