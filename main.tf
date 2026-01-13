@@ -113,7 +113,7 @@ resource "aws_iam_role_policy_attachment" "attach_mwaa_invoke_lambda" {
   role       = module.iam_roles_mwaa.role_name
   policy_arn = aws_iam_policy.mwaa_invoke_lambda.arn
 }
-# Custom MWAA policy to allow access to CloudWatch Logs and S3
+# 
 resource "aws_iam_role_policy" "mwaa_policy" {
   name = "mwaa-custom-execution-policy"
   role = module.iam_roles_mwaa.role_name
@@ -121,30 +121,73 @@ resource "aws_iam_role_policy" "mwaa_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # 1. LOGGING & METRICS: Allows Airflow to send DAG logs to CloudWatch 
+      # and performance metrics (CPU/Memory) to the CloudWatch dashboard.
       {
         Effect = "Allow"
         Action = [
           "airflow:PublishMetrics",
-
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents",
-
-          "cloudwatch:PutMetricData",
-
+          "logs:GetLogEvents",
+          "logs:GetLogRecord",
+          "logs:GetLogGroupFields",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams",
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+      },
+      # 2. STORAGE (S3): Allows Airflow to read your DAGs, plugins, and 
+      # requirements.txt files from your S3 bucket.
+      {
+        Effect = "Allow"
+        Action = [
           "s3:GetBucketLocation",
           "s3:GetObject",
           "s3:ListBucket",
-          "s3:ListAllMyBuckets",
-          "s3:GetAccountPublicAccessBlock",
-          "s3:GetBucketPublicAccessBlock"
+          "s3:ListAllMyBuckets"
         ]
         Resource = "*"
+      },
+      # 3. TASK QUEUE (SQS): Mandatory for the Celery Executor. 
+      # This allows the Scheduler to send tasks to the Workers via an internal queue.
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ChangeMessageVisibility",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ReceiveMessage",
+          "sqs:SendMessage"
+        ]
+        Resource = "arn:aws:sqs:us-east-1:*:airflow-celery-*"
+      },
+      # 4. ENCRYPTION (KMS): Allows Airflow to decrypt/encrypt data 
+      # when it interacts with S3 and SQS using AWS-managed keys.
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:GenerateDataKey*",
+          "kms:Encrypt"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "kms:ViaService" = [
+              "sqs.us-east-1.amazonaws.com",
+              "s3.us-east-1.amazonaws.com"
+            ]
+          }
+        }
       }
     ]
   })
 }
-
 # Packaging Lambda function code
 data "archive_file" "first_lambda_function" {
   type        = "zip"

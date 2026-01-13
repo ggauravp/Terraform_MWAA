@@ -4,6 +4,13 @@ resource "aws_security_group" "mwaa_sg" {
   description = "Security group for MWAA"
   vpc_id      = var.vpc_id
 
+  ingress {
+    from_port = 0
+    to_port   = 65535
+    protocol  = "tcp"
+    self      = true # This means "Allow traffic from myself"
+  }
+  
   # MWAA requires outbound internet/VPC access
   egress {
     from_port   = 0
