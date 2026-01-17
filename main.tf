@@ -113,7 +113,7 @@ resource "aws_iam_role_policy_attachment" "attach_mwaa_invoke_lambda" {
   role       = module.iam_roles_mwaa.role_name
   policy_arn = aws_iam_policy.mwaa_invoke_lambda.arn
 }
-# 
+
 resource "aws_iam_role_policy" "mwaa_policy" {
   name = "mwaa-custom-execution-policy"
   role = module.iam_roles_mwaa.role_name
@@ -188,6 +188,32 @@ resource "aws_iam_role_policy" "mwaa_policy" {
     ]
   })
 }
+# Policy to check public access block on S3 buckets (for MWAA)
+resource "aws_iam_policy" "mwaa_public_access_checks" {
+  name = "mwaa-public-access-checks"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "s3:GetAccountPublicAccessBlock"
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "s3:GetBucketPublicAccessBlock"
+        Resource = "arn:aws:s3:::gaurav-mwaa-bucket-123456"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "mwaa_public_access_attach" {
+  role       = module.iam_roles_mwaa.role_name
+  policy_arn = aws_iam_policy.mwaa_public_access_checks.arn
+}
+
 # Packaging Lambda function code
 data "archive_file" "first_lambda_function" {
   type        = "zip"

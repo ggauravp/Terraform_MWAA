@@ -65,7 +65,7 @@ resource "aws_mwaa_environment" "this" {
   min_workers = var.min_workers
   max_workers = var.max_workers
 
-  webserver_access_mode = "PRIVATE_ONLY"
+  webserver_access_mode = "PUBLIC_ONLY"
 
   airflow_configuration_options = {
     "core.load_examples" = "false"
